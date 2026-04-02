@@ -294,7 +294,7 @@ spec:
 MySQL에 저장된 부서 정보를 성공적으로 조회했습니다.
 
 - **접속 주소:** http://myapp.local:30225/emp/deptall
-
+  <img width="1919" height="1019" alt="image" src="https://github.com/user-attachments/assets/047a63af-472c-4744-8665-e32b656db408" />
 
 - **검증 내용**
   - 통신 성공: myapp.local 도메인과 32569 포트를 통한 외부 접속 확인
