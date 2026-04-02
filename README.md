@@ -288,6 +288,21 @@ spec:
 
 ---
 
+## 🚀 실행 결과 및 데이터 조회 확인
+
+브라우저에서 Ingress와 NodePort를 통해 가상머신 내 쿠버네티스 클러스터에 접속하여,  
+MySQL에 저장된 부서 정보를 성공적으로 조회했습니다.
+
+- **접속 주소:** http://myapp.local:30225/emp/deptall
+
+
+- **검증 내용**
+  - 통신 성공: myapp.local 도메인과 32569 포트를 통한 외부 접속 확인
+  - 앱 동작: Spring Boot 컨테이너가 Ingress를 통해 들어온 요청을 정상 처리
+  - DB 연동: Spring Boot 앱이 MySQL 서비스(db-service)에 접속하여 fisa 데이터베이스의 데이터를 정상 조회**
+
+---
+
 ## ✅ 실습 완료 체크리스트
 
 - [x] Spring Boot Docker 이미지 빌드 → Docker Hub 업로드
