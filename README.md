@@ -63,64 +63,200 @@ spring-service (ClusterIP)
 
 ---
 
-## ⚙️ 주요 구성 요소 설명
 
-### 1. Secret & ConfigMap — 설정 분리
-
+ 
+## ⚙️ YAML 파일 상세
+ 
+### 01-secret.yaml — 민감 정보 관리
+ 
 ```yaml
-# 01-secret.yaml
-# DB 비밀번호 등 민감 정보를 코드와 분리하여 관리
+apiVersion: v1
 kind: Secret
-
-# 02-configmap.yaml
-# DB 주소, 포트 등 일반 설정 관리
+metadata:
+  name: app-secret
+type: Opaque
+stringData:
+  MYSQL_ROOT_PASSWORD: "root1234"
+  MYSQL_DATABASE: "fisa"
+  MYSQL_USER: "user01"
+  MYSQL_PASSWORD: "user01"
+  SPRING_DATASOURCE_PASSWORD: "user01"
+```
+ 
+> **핵심:** 비밀번호 등 민감 정보를 코드와 분리하여 관리.  
+> `stringData`로 평문 작성 → 쿠버네티스가 자동으로 Base64 인코딩하여 저장.
+ 
+---
+ 
+### 02-configmap.yaml — 일반 설정 관리
+ 
+```yaml
+apiVersion: v1
 kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  SPRING_DATASOURCE_URL: "jdbc:mysql://db:3306/fisa?serverTimezone=Asia/Seoul&useSSL=false&allowPublicKeyRetrieval=true"
+  SPRING_DATASOURCE_USERNAME: "user01"
+  SPRING_JPA_HIBERNATE_DDL_AUTO: "update"
 ```
-
-> 코드와 설정을 분리하는 것이 실무의 핵심 (IaC 개념)
-
+ 
+> **핵심:** DB 접속 URL에서 `db`는 MySQL Service 이름. IP 대신 이름으로 접근하므로  
+> Pod가 재시작되어 IP가 바뀌어도 영향 없음.
+ 
 ---
-
-### 2. MySQL — DB 컨테이너
-
+ 
+### 03-mysql.yaml — MySQL Deployment & Service
+ 
 ```yaml
-# 03-mysql.yaml
+apiVersion: apps/v1
 kind: Deployment
-replicas: 1
-
+metadata:
+  name: mysql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:      # Secret에서 값을 가져옴
+                  name: app-secret
+                  key: MYSQL_ROOT_PASSWORD
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: MYSQL_DATABASE
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: MYSQL_USER
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: app-secret
+                  key: MYSQL_PASSWORD
 ---
+apiVersion: v1
 kind: Service
-# 고정된 이름 'db'로 Pod에 접근 가능
-# → Spring에서 jdbc:mysql://db:3306/fisa 로 접속
+metadata:
+  name: db              # Spring이 'db'라는 이름으로 접근
+spec:
+  selector:
+    app: mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+  type: ClusterIP       # 클러스터 내부에서만 접근 가능
 ```
-
+ 
+> **핵심:** Service 이름 `db`가 DNS 역할을 함.  
+> `jdbc:mysql://db:3306/fisa` 처럼 IP 없이 이름으로 DB 접근 가능.
+ 
 ---
-
-### 3. Spring Boot App — 앱 컨테이너
-
+ 
+### 04-spring-app.yaml — Spring Boot Deployment & Service
+ 
 ```yaml
-# 04-spring-app.yaml
+apiVersion: apps/v1
 kind: Deployment
-replicas: 2    # 고가용성(HA)을 위한 2개 복제
-
+metadata:
+  name: spring-app
+spec:
+  replicas: 2           # Pod 2개 → 고가용성(HA) 확보
+  selector:
+    matchLabels:
+      app: spring-app
+  template:
+    metadata:
+      labels:
+        app: spring-app
+    spec:
+      containers:
+        - name: spring-app
+          image: yewon0106/step04-empapp:1.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8084
+          env:
+            - name: SPRING_DATASOURCE_URL
+              valueFrom:
+                configMapKeyRef:   # ConfigMap에서 값을 가져옴
+                  name: app-config
+                  key: SPRING_DATASOURCE_URL
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: SPRING_DATASOURCE_USERNAME
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:      # Secret에서 값을 가져옴
+                  name: app-secret
+                  key: SPRING_DATASOURCE_PASSWORD
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: SPRING_JPA_HIBERNATE_DDL_AUTO
 ---
+apiVersion: v1
 kind: Service
+metadata:
+  name: spring-service
+spec:
+  selector:
+    app: spring-app
+  ports:
+    - port: 80          # 외부(Ingress)에서 80으로 접근
+      targetPort: 8084  # Pod 내부 포트 8084로 포워딩
+  type: ClusterIP
 ```
-
-> Pod가 2개이므로 하나가 죽어도 서비스 유지 → **고가용성(HA)**
-
+ 
+> **핵심:** `replicas: 2`로 Pod가 2개 실행됨.  
+> 하나가 죽어도 나머지 하나가 요청을 처리 → **고가용성(HA)**.  
+> 환경변수를 ConfigMap과 Secret에서 주입하여 이미지에 설정값이 포함되지 않음.
+ 
 ---
-
-### 4. Ingress — 외부 입구 + 라우터
-
+ 
+### 05-ingress.yaml — 외부 입구 & 라우터
+ 
 ```yaml
-# 05-ingress.yaml
-# myapp.local → spring-service 로 라우팅
+apiVersion: networking.k8s.io/v1
 kind: Ingress
+metadata:
+  name: spring-ingress
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: myapp.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: spring-service
+                port:
+                  number: 80
 ```
-
-> Nginx Ingress Controller가 트래픽을 받아 Pod로 부하 분산
-
+ 
+> **핵심:** `myapp.local`로 들어오는 모든 요청(`/`)을 `spring-service:80`으로 라우팅.  
+> Nginx Ingress Controller가 Pod 2개로 자동 부하 분산.
+ 
 ---
 
 ## 🔑 핵심 개념 정리
